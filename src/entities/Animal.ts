@@ -1,5 +1,6 @@
 import { Entity } from './Entity';
 import { SpriteEntity } from '../engine/SpriteRenderer';
+import { HabitatType, FoodType } from '../data/habitats';
 
 /** Animal behavior states */
 export enum AnimalState {
@@ -23,13 +24,38 @@ export interface SpeciesData {
   canSwim: boolean;
   /** Animations available */
   animations: string[];
+  /** Required habitat type */
+  habitatType: HabitatType;
+  /** Food this species eats */
+  foodType: FoodType;
+  /** Minimum tiles of space per animal */
+  spacePerAnimal: number;
+  /** Species IDs this animal can coexist with */
+  compatibleWith: string[];
+}
+
+/** Happiness breakdown for UI display */
+export interface HappinessFactors {
+  terrain: number;       // 0-25: habitat terrain match
+  space: number;         // 0-20: enough room
+  food: number;          // 0-20: has feeding station
+  enrichment: number;    // 0-20: enrichment items present
+  companions: number;    // 0-15: compatible neighbors
 }
 
 /** An animal living in the zoo */
 export class Animal extends Entity {
   readonly species: SpeciesData;
   state: AnimalState = AnimalState.Idle;
-  happiness = 75;
+  happiness = 50;
+
+  /** Per-factor happiness breakdown */
+  happinessFactors: HappinessFactors = {
+    terrain: 0, space: 0, food: 0, enrichment: 0, companions: 0,
+  };
+
+  /** Which habitat this animal is assigned to (null = free roaming demo) */
+  habitatId: number | null = null;
 
   // Movement
   private targetX: number;
@@ -38,10 +64,10 @@ export class Animal extends Entity {
   private stateDuration = 0;
 
   // Habitat bounds
-  private boundsMinX: number;
-  private boundsMinY: number;
-  private boundsMaxX: number;
-  private boundsMaxY: number;
+  boundsMinX: number;
+  boundsMinY: number;
+  boundsMaxX: number;
+  boundsMaxY: number;
 
   constructor(species: SpeciesData, tileX: number, tileY: number,
               boundsMinX: number, boundsMinY: number,
@@ -56,6 +82,13 @@ export class Animal extends Entity {
     this.boundsMaxY = boundsMaxY;
 
     this.chooseNewBehavior();
+  }
+
+  /** Update happiness from external factors calculation */
+  setHappiness(factors: HappinessFactors): void {
+    this.happinessFactors = factors;
+    this.happiness = factors.terrain + factors.space + factors.food
+                   + factors.enrichment + factors.companions;
   }
 
   update(deltaMs: number): void {
