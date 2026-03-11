@@ -10,6 +10,7 @@ export class ZooStatsPanel {
   private incomeRate = 0;
   private avgAnimalHappiness = 0;
   private facilityCount = 0;
+  private staffCount = 0;
 
   constructor() {
     this.element = document.createElement('div');
@@ -68,6 +69,7 @@ export class ZooStatsPanel {
     incomeRate: number;
     avgAnimalHappiness: number;
     facilityCount: number;
+    staffCount?: number;
   }): void {
     this.visitorCount = data.visitorCount;
     this.zooRating = data.zooRating;
@@ -75,6 +77,7 @@ export class ZooStatsPanel {
     this.incomeRate = data.incomeRate;
     this.avgAnimalHappiness = data.avgAnimalHappiness;
     this.facilityCount = data.facilityCount;
+    this.staffCount = data.staffCount ?? 0;
 
     if (this.visible) this.render();
   }
@@ -102,6 +105,7 @@ export class ZooStatsPanel {
       { label: 'Income Rate', value: `$${Math.floor(this.incomeRate)}/min`, color: '#64ffda' },
       { label: 'Avg Happiness', value: `${Math.round(this.avgAnimalHappiness)}%`, color: this.getHappinessColor(this.avgAnimalHappiness) },
       { label: 'Facilities', value: `${this.facilityCount}`, color: '#ccc' },
+      { label: 'Staff', value: `${this.staffCount}`, color: '#2196f3' },
     ];
 
     this.element.append(header, stars);

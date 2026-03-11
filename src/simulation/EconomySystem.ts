@@ -50,11 +50,11 @@ export class EconomySystem {
   }
 
   /** Called every 10 seconds — deducts scaled upkeep costs */
-  tickUpkeep(animalCount: number, facilityCount: number): void {
+  tickUpkeep(animalCount: number, facilityCount: number, upkeepMultiplier = 1.0): void {
     // Scale per-minute rates to 10-second intervals (1/6 of a minute)
     const animalCost = (UPKEEP_COSTS.animalPerMinute * animalCount) / 6;
     const facilityCost = (UPKEEP_COSTS.facilityPerMinute * facilityCount) / 6;
-    const total = Math.round(animalCost + facilityCost);
+    const total = Math.round((animalCost + facilityCost) * upkeepMultiplier);
     if (total > 0) {
       this.spend(total, 'Upkeep');
     }

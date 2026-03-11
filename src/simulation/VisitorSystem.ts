@@ -99,13 +99,14 @@ export class VisitorSystem {
     animals: Animal[],
     habitats: Habitat[],
     zooRating: number,
+    maxVisitors = 50,
   ): { spawned: Visitor[]; despawned: Visitor[]; income: number } {
     const result = { spawned: [] as Visitor[], despawned: [] as Visitor[], income: 0 };
 
     // Spawn visitors
     this.spawnTimer += deltaMs;
     const interval = this.getSpawnInterval(zooRating);
-    if (this.spawnTimer >= interval && visitors.length < 50 && this.entrances.length > 0) {
+    if (this.spawnTimer >= interval && visitors.length < maxVisitors && this.entrances.length > 0) {
       this.spawnTimer = 0;
       const entrance = this.entrances[Math.floor(Math.random() * this.entrances.length)];
       const visitor = new Visitor(entrance.x + 0.5, entrance.y + 0.5);

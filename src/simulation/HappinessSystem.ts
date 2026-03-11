@@ -12,7 +12,7 @@ export class HappinessSystem {
   }
 
   /** Recalculate happiness for all animals given current habitats */
-  update(animals: Animal[], habitats: Habitat[]): void {
+  update(animals: Animal[], habitats: Habitat[], happinessMultiplier = 1.0): void {
     // Build a map of habitat id -> animals in it
     const habitatAnimals = new Map<number, Animal[]>();
     for (const animal of animals) {
@@ -32,6 +32,14 @@ export class HappinessSystem {
         : [];
 
       const factors = this.evaluate(animal, habitat, neighbors);
+      // Apply research multiplier to all happiness factors
+      if (happinessMultiplier !== 1.0) {
+        factors.terrain = Math.min(25, Math.round(factors.terrain * happinessMultiplier));
+        factors.space = Math.min(20, Math.round(factors.space * happinessMultiplier));
+        factors.food = Math.min(20, Math.round(factors.food * happinessMultiplier));
+        factors.enrichment = Math.min(20, Math.round(factors.enrichment * happinessMultiplier));
+        factors.companions = Math.min(15, Math.round(factors.companions * happinessMultiplier));
+      }
       animal.setHappiness(factors);
     }
   }

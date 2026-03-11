@@ -16,6 +16,11 @@ import { Visitor } from '../entities/Visitor';
 import { ZooStatsPanel } from '../ui/ZooStatsPanel';
 import { EconomySystem } from '../simulation/EconomySystem';
 import { EconomyPanel } from '../ui/EconomyPanel';
+import { ResearchSystem } from '../simulation/ResearchSystem';
+import { ResearchPanel } from '../ui/ResearchPanel';
+import { StaffSystem } from '../simulation/StaffSystem';
+import { StaffPanel } from '../ui/StaffPanel';
+import { Staff } from '../entities/Staff';
 import { screenToTile, isInBounds, tileToScreen } from '../utils/IsoMath';
 
 /** Main game class — orchestrates the game loop, rendering, and input */
@@ -36,6 +41,10 @@ export class Game {
   private visitorSystem!: VisitorSystem;
   private economySystem!: EconomySystem;
   private economyPanel!: EconomyPanel;
+  private researchSystem!: ResearchSystem;
+  private researchPanel!: ResearchPanel;
+  private staffSystem!: StaffSystem;
+  private staffPanel!: StaffPanel;
   private habitats: Habitat[] = [];
   private visitors: Visitor[] = [];
   private zooRating = 1;
@@ -107,6 +116,12 @@ export class Game {
     // Initialize economy system
     this.economySystem = new EconomySystem(10000);
 
+    // Initialize research system
+    this.researchSystem = new ResearchSystem(this.economySystem);
+
+    // Initialize staff system
+    this.staffSystem = new StaffSystem(this.tileMap, this.economySystem);
+
     // Spawn demo animals
     this.spawnDemoAnimals();
 
@@ -122,10 +137,19 @@ export class Game {
     this.animalPanel = new AnimalPanel();
     this.zooStatsPanel = new ZooStatsPanel();
     this.economyPanel = new EconomyPanel(this.economySystem);
+    this.researchPanel = new ResearchPanel(this.researchSystem);
+    this.staffPanel = new StaffPanel(this.staffSystem, this.economySystem);
+    // Set staff spawn point to center path
+    const spawnCenter = Math.floor(this.tileMap.width / 2);
+    this.staffPanel.spawnTileX = spawnCenter;
+    this.staffPanel.spawnTileY = spawnCenter;
 
-    // Mutual exclusion: opening one panel closes the other
-    this.zooStatsPanel.onOpen = () => this.economyPanel.hide();
-    this.economyPanel.onOpen = () => this.zooStatsPanel.hide();
+    // Mutual exclusion: opening one panel closes the others
+    const hideAll = () => { this.zooStatsPanel.hide(); this.economyPanel.hide(); this.researchPanel.hide(); this.staffPanel.hide(); };
+    this.zooStatsPanel.onOpen = () => { hideAll(); };
+    this.economyPanel.onOpen = () => { hideAll(); };
+    this.researchPanel.onOpen = () => { hideAll(); };
+    this.staffPanel.onOpen = () => { hideAll(); };
 
     // Center camera on the middle of the tile map
     const center = tileToScreen(
@@ -158,29 +182,47 @@ export class Game {
       animal.update(deltaMs);
     }
 
+    // Tick research
+    this.researchSystem.update(deltaMs);
+
+    // Update staff AI
+    this.staffSystem.update(deltaMs, this.habitats);
+
     // Periodically update happiness
     this.happinessTimer += deltaMs;
     if (this.happinessTimer >= this.happinessInterval) {
       this.happinessTimer = 0;
-      this.happinessSystem.update(this.animals, this.habitats);
-      this.zooRating = this.visitorSystem.calculateZooRating(this.animals, this.habitats);
-      // Update admission price based on rating
-      this.visitorSystem.admissionPrice = this.economySystem.getAdmissionPrice(this.zooRating);
+      const happinessMultiplier = this.researchSystem.getHappinessMultiplier()
+        + this.staffSystem.getStaffHappinessBonus();
+      this.happinessSystem.update(this.animals, this.habitats, happinessMultiplier);
+      this.zooRating = this.visitorSystem.calculateZooRating(this.animals, this.habitats)
+        + this.researchSystem.getRatingBonus()
+        + this.staffSystem.getCleanlinessBonus();
+      this.zooRating = Math.max(1, Math.min(5, this.zooRating));
+      // Update admission price based on rating + research bonus
+      const baseAdmission = this.economySystem.getAdmissionPrice(this.zooRating);
+      this.visitorSystem.admissionPrice = Math.round(baseAdmission * this.researchSystem.getAdmissionMultiplier());
     }
 
     // Economy minute cycle
     this.economySystem.updateMinuteCycle(deltaMs);
 
-    // Upkeep tick
+    // Upkeep tick (with research reduction) + staff salaries
     this.upkeepTimer += deltaMs;
     if (this.upkeepTimer >= this.upkeepInterval) {
       this.upkeepTimer = 0;
-      this.economySystem.tickUpkeep(this.animals.length, this.visitorSystem.countFacilities());
+      this.economySystem.tickUpkeep(
+        this.animals.length,
+        this.visitorSystem.countFacilities(),
+        this.researchSystem.getUpkeepMultiplier(),
+      );
+      this.staffSystem.tickSalaries();
     }
 
-    // Update visitors
+    // Update visitors (with research capacity bonus)
     const visitorResult = this.visitorSystem.update(
       deltaMs, this.visitors, this.animals, this.habitats, this.zooRating,
+      50 + this.researchSystem.getVisitorCapacityBonus(),
     );
     for (const v of visitorResult.spawned) this.visitors.push(v);
     for (const v of visitorResult.despawned) {
@@ -200,21 +242,25 @@ export class Game {
       avgAnimalHappiness: this.animals.length > 0
         ? this.animals.reduce((s, a) => s + a.happiness, 0) / this.animals.length : 0,
       facilityCount: this.visitorSystem.countFacilities(),
+      staffCount: this.staffSystem.staff.length,
     });
 
     this.updateHoverHighlight();
     this.renderer.render(deltaMs);
 
-    // Render entity sprites (animals + visitors)
+    // Render entity sprites (animals + visitors + staff)
     const spriteEntities = [
       ...this.animals.map(a => a.toSpriteEntity()),
       ...this.visitors.map(v => v.toSpriteEntity()),
+      ...this.staffSystem.staff.map(s => s.toSpriteEntity()),
     ];
     this.spriteRenderer.render(spriteEntities, deltaMs);
 
     // Refresh animal panel if open
     this.animalPanel.refresh();
     this.economyPanel.refresh();
+    this.researchPanel.refresh();
+    this.staffPanel.refresh();
 
     this.updateHUD();
   }
