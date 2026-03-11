@@ -2,7 +2,10 @@ import { Application } from 'pixi.js';
 import { Camera } from './Camera';
 import { InputManager } from './InputManager';
 import { IsometricRenderer } from './IsometricRenderer';
+import { SpriteRenderer } from './SpriteRenderer';
 import { TileMap, TILE_PROPERTIES } from '../world/TileMap';
+import { Animal } from '../entities/Animal';
+import { SPECIES } from '../data/species';
 import { screenToTile, isInBounds, tileToScreen } from '../utils/IsoMath';
 
 /** Main game class — orchestrates the game loop, rendering, and input */
@@ -11,7 +14,9 @@ export class Game {
   private camera: Camera;
   private input!: InputManager;
   private renderer!: IsometricRenderer;
+  private spriteRenderer!: SpriteRenderer;
   private tileMap: TileMap;
+  private animals: Animal[] = [];
 
   // Edge scrolling
   private readonly edgeScrollMargin = 40;
@@ -44,10 +49,15 @@ export class Game {
     // Initialize subsystems
     this.input = new InputManager(this.app.canvas as HTMLCanvasElement);
     this.renderer = new IsometricRenderer(this.tileMap, this.camera);
+    this.spriteRenderer = new SpriteRenderer(this.camera);
     this.app.stage.addChild(this.renderer.container);
+    this.renderer.container.addChild(this.spriteRenderer.container);
 
     // Generate the starter map
     this.tileMap.generateStarterMap();
+
+    // Spawn demo animals
+    this.spawnDemoAnimals();
 
     // Center camera on the middle of the tile map
     // tileToScreen(32,32) for a 64x64 map = ((32-32)*32, (32+32)*16) = (0, 1024)
@@ -68,10 +78,23 @@ export class Game {
   }
 
   private update(): void {
+    const deltaMs = this.app.ticker.deltaMS;
+
     this.handleInput();
     this.camera.update();
+
+    // Update animals
+    for (const animal of this.animals) {
+      animal.update(deltaMs);
+    }
+
     this.updateHoverHighlight();
     this.renderer.render();
+
+    // Render entity sprites
+    const spriteEntities = this.animals.map(a => a.toSpriteEntity());
+    this.spriteRenderer.render(spriteEntities, deltaMs);
+
     this.updateHUD();
   }
 
@@ -151,6 +174,60 @@ export class Game {
         }
       }
     }
+  }
+
+  /** Spawn demo animals for testing */
+  private spawnDemoAnimals(): void {
+    const cx = Math.floor(this.tileMap.width / 2);
+    const cy = Math.floor(this.tileMap.height / 2);
+
+    // Komodo dragon near center-left
+    this.animals.push(new Animal(
+      SPECIES.komodo_dragon, cx - 6, cy - 3,
+      cx - 10, cy - 6, cx - 2, cy + 2
+    ));
+
+    // Green iguana near center
+    this.animals.push(new Animal(
+      SPECIES.green_iguana, cx - 4, cy + 4,
+      cx - 8, cy + 1, cx, cy + 7
+    ));
+
+    // Chameleon near top
+    this.animals.push(new Animal(
+      SPECIES.chameleon, cx + 3, cy - 5,
+      cx, cy - 8, cx + 6, cy - 2
+    ));
+
+    // Galápagos tortoise near bottom
+    this.animals.push(new Animal(
+      SPECIES.galapagos_tortoise, cx + 5, cy + 5,
+      cx + 2, cy + 2, cx + 9, cy + 8
+    ));
+
+    // Saltwater croc near the pond
+    this.animals.push(new Animal(
+      SPECIES.saltwater_croc, cx + 7, cy - 1,
+      cx + 4, cy - 3, cx + 12, cy + 3
+    ));
+
+    // Poison dart frog
+    this.animals.push(new Animal(
+      SPECIES.poison_dart_frog, cx - 3, cy - 6,
+      cx - 6, cy - 9, cx, cy - 3
+    ));
+
+    // Leopard gecko
+    this.animals.push(new Animal(
+      SPECIES.leopard_gecko, cx + 2, cy + 3,
+      cx - 1, cy + 1, cx + 5, cy + 6
+    ));
+
+    // Axolotl near the water
+    this.animals.push(new Animal(
+      SPECIES.axolotl, cx + 9, cy + 1,
+      cx + 6, cy - 2, cx + 12, cy + 4
+    ));
   }
 
   private updateHUD(): void {
