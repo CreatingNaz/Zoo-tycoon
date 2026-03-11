@@ -7,8 +7,10 @@ import { TileMap, TileType, TILE_PROPERTIES } from '../world/TileMap';
 import { Animal } from '../entities/Animal';
 import { SPECIES } from '../data/species';
 import { BuildPanel } from '../ui/BuildPanel';
+import { AnimalPanel } from '../ui/AnimalPanel';
 import { BuildItem } from '../data/buildings';
-import { HabitatDetector } from '../world/Habitat';
+import { HabitatDetector, Habitat } from '../world/Habitat';
+import { HappinessSystem } from '../simulation/HappinessSystem';
 import { screenToTile, isInBounds, tileToScreen } from '../utils/IsoMath';
 
 /** Main game class — orchestrates the game loop, rendering, and input */
@@ -21,8 +23,15 @@ export class Game {
   private tileMap: TileMap;
   private animals: Animal[] = [];
   private buildPanel!: BuildPanel;
+  private animalPanel!: AnimalPanel;
   private currentBuildItem: BuildItem | null = null;
   private habitatDetector!: HabitatDetector;
+  private happinessSystem!: HappinessSystem;
+  private habitats: Habitat[] = [];
+
+  // Happiness update throttle (every 2 seconds)
+  private happinessTimer = 0;
+  private readonly happinessInterval = 2000;
 
   // Edge scrolling
   private readonly edgeScrollMargin = 40;
@@ -62,13 +71,16 @@ export class Game {
     // Generate the starter map
     this.tileMap.generateStarterMap();
 
-    // Spawn demo animals
-    this.spawnDemoAnimals();
-
     // Initialize habitat detector
     this.habitatDetector = new HabitatDetector(this.tileMap);
 
-    // Initialize build panel
+    // Initialize happiness system
+    this.happinessSystem = new HappinessSystem(this.tileMap);
+
+    // Spawn demo animals
+    this.spawnDemoAnimals();
+
+    // Initialize UI panels
     this.buildPanel = new BuildPanel();
     this.buildPanel.onSelectionChange = (item) => {
       this.currentBuildItem = item;
@@ -77,8 +89,9 @@ export class Game {
       }
     };
 
+    this.animalPanel = new AnimalPanel();
+
     // Center camera on the middle of the tile map
-    // tileToScreen(32,32) for a 64x64 map = ((32-32)*32, (32+32)*16) = (0, 1024)
     const center = tileToScreen(
       Math.floor(this.tileMap.width / 2),
       Math.floor(this.tileMap.height / 2)
@@ -90,6 +103,9 @@ export class Game {
       this.camera.viewportWidth = window.innerWidth;
       this.camera.viewportHeight = window.innerHeight;
     });
+
+    // Initial habitat detection
+    this.habitats = this.habitatDetector.detectAll();
 
     // Start the game loop
     this.app.ticker.add(() => this.update());
@@ -106,12 +122,22 @@ export class Game {
       animal.update(deltaMs);
     }
 
+    // Periodically update happiness
+    this.happinessTimer += deltaMs;
+    if (this.happinessTimer >= this.happinessInterval) {
+      this.happinessTimer = 0;
+      this.happinessSystem.update(this.animals, this.habitats);
+    }
+
     this.updateHoverHighlight();
     this.renderer.render(deltaMs);
 
     // Render entity sprites
     const spriteEntities = this.animals.map(a => a.toSpriteEntity());
     this.spriteRenderer.render(spriteEntities, deltaMs);
+
+    // Refresh animal panel if open
+    this.animalPanel.refresh();
 
     this.updateHUD();
   }
@@ -198,9 +224,10 @@ export class Game {
 
         // Re-detect habitats when fences are placed
         if (TileMap.isFence(this.currentBuildItem.tileType)) {
-          const habitats = this.habitatDetector.detectAll();
-          if (habitats.length > 0) {
-            console.log(`Detected ${habitats.length} habitat(s):`, habitats.map(h => `${h.area} tiles`));
+          this.habitats = this.habitatDetector.detectAll();
+          this.assignAnimalsToHabitats();
+          if (this.habitats.length > 0) {
+            console.log(`Detected ${this.habitats.length} habitat(s):`, this.habitats.map(h => `${h.area} tiles`));
           }
         }
       } else {
@@ -211,19 +238,81 @@ export class Game {
           label: this.currentBuildItem.label,
         });
         this.updateHUDMoney(-this.currentBuildItem.cost);
+        // Trigger happiness recalc since enrichment changed
+        this.happinessSystem.update(this.animals, this.habitats);
       }
       return;
     }
 
-    // Normal mode: inspect tile
+    // Normal mode: check if clicked on an animal first
+    const clickedAnimal = this.findAnimalAt(tile.x, tile.y);
+    if (clickedAnimal) {
+      this.animalPanel.show(clickedAnimal);
+      return;
+    }
+
+    // Otherwise inspect tile
     const cell = this.tileMap.getCell(tile.x, tile.y);
     if (cell) {
       const props = TILE_PROPERTIES[cell.type];
-      console.log(`Clicked tile (${tile.x}, ${tile.y}): ${props.label}`);
-
       const hudTile = document.getElementById('hud-tile');
       if (hudTile) {
         hudTile.textContent = `(${tile.x}, ${tile.y}) ${props.label}`;
+      }
+    }
+  }
+
+  /** Find an animal near the clicked tile position */
+  private findAnimalAt(tileX: number, tileY: number): Animal | null {
+    const clickRadius = 1.5; // tiles
+    let closest: Animal | null = null;
+    let closestDist = clickRadius;
+
+    for (const animal of this.animals) {
+      const dx = animal.tileX - tileX;
+      const dy = animal.tileY - tileY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = animal;
+      }
+    }
+    return closest;
+  }
+
+  /** Assign animals to detected habitats based on their tile position */
+  private assignAnimalsToHabitats(): void {
+    // Build a set lookup for each habitat
+    const habitatTileSets = this.habitats.map(h => {
+      const set = new Set<string>();
+      for (const t of h.tiles) set.add(`${Math.floor(t.x)},${Math.floor(t.y)}`);
+      return { habitat: h, set };
+    });
+
+    for (const animal of this.animals) {
+      const key = `${Math.floor(animal.tileX)},${Math.floor(animal.tileY)}`;
+      let found = false;
+      for (const { habitat, set } of habitatTileSets) {
+        if (set.has(key)) {
+          animal.habitatId = habitat.id;
+          // Update bounds to match habitat bounding box
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          for (const t of habitat.tiles) {
+            if (t.x < minX) minX = t.x;
+            if (t.y < minY) minY = t.y;
+            if (t.x > maxX) maxX = t.x + 1;
+            if (t.y > maxY) maxY = t.y + 1;
+          }
+          animal.boundsMinX = minX;
+          animal.boundsMinY = minY;
+          animal.boundsMaxX = maxX;
+          animal.boundsMaxY = maxY;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        animal.habitatId = null;
       }
     }
   }
