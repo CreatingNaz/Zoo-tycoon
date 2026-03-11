@@ -1,5 +1,17 @@
 import { Container, Graphics } from 'pixi.js';
 import { TileMap, TileType, TILE_PROPERTIES } from '../world/TileMap';
+import { WaterFilter } from '../effects/WaterShader';
+
+/** Fence tile types for special rendering */
+const FENCE_TYPES = new Set([
+  TileType.FenceWire,
+  TileType.FenceGlass,
+  TileType.FenceWall,
+  TileType.FenceWooden,
+]);
+
+const WATER_TYPES = new Set([TileType.Water, TileType.DeepWater]);
+
 import { tileToScreen, TILE_WIDTH, TILE_HEIGHT } from '../utils/IsoMath';
 import { Camera } from './Camera';
 
@@ -7,6 +19,8 @@ import { Camera } from './Camera';
 export class IsometricRenderer {
   readonly container: Container;
   private tileGraphics: Graphics;
+  private waterGraphics: Graphics;
+  private waterFilter: WaterFilter;
   private highlightGraphics: Graphics;
   private tileMap: TileMap;
   private camera: Camera;
@@ -15,22 +29,36 @@ export class IsometricRenderer {
   highlightX: number = -1;
   highlightY: number = -1;
 
+  /** Ghost preview tile (build mode) */
+  private ghostX: number = -1;
+  private ghostY: number = -1;
+  private ghostColor: number = 0;
+  private ghostActive: boolean = false;
+
   constructor(tileMap: TileMap, camera: Camera) {
     this.tileMap = tileMap;
     this.camera = camera;
 
     this.container = new Container();
     this.tileGraphics = new Graphics();
+    this.waterGraphics = new Graphics();
+    this.waterFilter = new WaterFilter();
+    this.waterGraphics.filters = [this.waterFilter];
     this.highlightGraphics = new Graphics();
 
     this.container.addChild(this.tileGraphics);
+    this.container.addChild(this.waterGraphics);
     this.container.addChild(this.highlightGraphics);
   }
 
-  /** Render all visible tiles */
-  render(): void {
+  /** Render all visible tiles. Pass deltaMs to animate the water shader. */
+  render(deltaMs: number = 16): void {
     this.tileGraphics.clear();
+    this.waterGraphics.clear();
     this.highlightGraphics.clear();
+
+    // Update water shader animation
+    this.waterFilter.update(deltaMs);
 
     const transform = this.camera.getContainerTransform();
     this.container.x = transform.x;
@@ -67,8 +95,21 @@ export class IsometricRenderer {
         const props = TILE_PROPERTIES[cell.type];
         const screen = tileToScreen(tx, ty);
 
-        this.drawDiamondTile(this.tileGraphics, screen.x, screen.y, props.color, cell.type);
+        // Water tiles go to the water layer (has GLSL displacement filter)
+        const target = WATER_TYPES.has(cell.type) ? this.waterGraphics : this.tileGraphics;
+        this.drawDiamondTile(target, screen.x, screen.y, props.color, cell.type);
+
+        // Draw decoration on tile
+        if (cell.decoration) {
+          this.drawDecoration(this.tileGraphics, screen.x, screen.y, cell.decoration.color);
+        }
       }
+    }
+
+    // Draw ghost preview in build mode
+    if (this.ghostActive && this.ghostX >= 0 && this.ghostY >= 0) {
+      const screen = tileToScreen(this.ghostX, this.ghostY);
+      this.drawGhostTile(screen.x, screen.y, this.ghostColor);
     }
 
     // Draw highlight on hovered tile
@@ -120,18 +161,58 @@ export class IsometricRenderer {
     ]);
     g.stroke({ color: this.darken(color, 0.5), width: 0.5, alpha: 0.3 });
 
-    // Add water shimmer effect
-    if (type === TileType.Water || type === TileType.DeepWater) {
-      const time = performance.now() * 0.001;
-      const shimmerAlpha = 0.1 + Math.sin(time * 2 + x * 0.1 + y * 0.1) * 0.05;
+    // Fence: draw taller side walls to look like a barrier
+    if (FENCE_TYPES.has(type)) {
+      const fenceHeight = 12;
+      // Left wall
       g.poly([
-        x + hw, y,
-        x + TILE_WIDTH, y + hh,
-        x + hw, y + TILE_HEIGHT,
         x, y + hh,
+        x + hw, y + TILE_HEIGHT,
+        x + hw, y + TILE_HEIGHT - fenceHeight,
+        x, y + hh - fenceHeight,
       ]);
-      g.fill({ color: 0xffffff, alpha: shimmerAlpha });
+      g.fill({ color: this.darken(color, 0.85) });
+
+      // Right wall
+      g.poly([
+        x + hw, y + TILE_HEIGHT,
+        x + TILE_WIDTH, y + hh,
+        x + TILE_WIDTH, y + hh - fenceHeight,
+        x + hw, y + TILE_HEIGHT - fenceHeight,
+      ]);
+      g.fill({ color: this.darken(color, 0.7) });
+
+      // Top face raised
+      g.poly([
+        x + hw, y - fenceHeight,
+        x + TILE_WIDTH, y + hh - fenceHeight,
+        x + hw, y + TILE_HEIGHT - fenceHeight,
+        x, y + hh - fenceHeight,
+      ]);
+      g.fill({ color });
+
+      // Top outline
+      g.poly([
+        x + hw, y - fenceHeight,
+        x + TILE_WIDTH, y + hh - fenceHeight,
+        x + hw, y + TILE_HEIGHT - fenceHeight,
+        x, y + hh - fenceHeight,
+      ]);
+      g.stroke({ color: this.darken(color, 0.5), width: 0.5, alpha: 0.5 });
+
+      // Glass wall: add transparency effect
+      if (type === TileType.FenceGlass) {
+        g.poly([
+          x, y + hh - fenceHeight,
+          x + hw, y + TILE_HEIGHT - fenceHeight,
+          x + hw, y + TILE_HEIGHT,
+          x, y + hh,
+        ]);
+        g.fill({ color: 0xffffff, alpha: 0.15 });
+      }
     }
+
+    // Water shimmer is handled by the WaterFilter GLSL shader on the water layer
   }
 
   /** Draw highlight diamond over a tile */
@@ -147,6 +228,36 @@ export class IsometricRenderer {
     ]);
     this.highlightGraphics.fill({ color: 0xffffff, alpha: 0.15 });
     this.highlightGraphics.stroke({ color: 0x64ffda, width: 2, alpha: 0.8 });
+  }
+
+  /** Draw a decoration icon on a tile */
+  private drawDecoration(g: Graphics, x: number, y: number, color: number): void {
+    const cx = x + TILE_WIDTH / 2;
+    const cy = y + TILE_HEIGHT / 2;
+
+    // Small 3D-ish object: base circle + top
+    g.circle(cx, cy - 6, 6);
+    g.fill({ color, alpha: 0.9 });
+    g.stroke({ color: this.darken(color, 0.5), width: 1, alpha: 0.6 });
+
+    // Shadow
+    g.ellipse(cx, cy, 5, 2);
+    g.fill({ color: 0x000000, alpha: 0.15 });
+  }
+
+  /** Draw a semi-transparent ghost preview tile */
+  private drawGhostTile(x: number, y: number, color: number): void {
+    const hw = TILE_WIDTH / 2;
+    const hh = TILE_HEIGHT / 2;
+
+    this.highlightGraphics.poly([
+      x + hw, y,
+      x + TILE_WIDTH, y + hh,
+      x + hw, y + TILE_HEIGHT,
+      x, y + hh,
+    ]);
+    this.highlightGraphics.fill({ color, alpha: 0.5 });
+    this.highlightGraphics.stroke({ color: 0xffffff, width: 1.5, alpha: 0.8 });
   }
 
   /** Darken a color by a factor */
@@ -167,5 +278,20 @@ export class IsometricRenderer {
   clearHighlight(): void {
     this.highlightX = -1;
     this.highlightY = -1;
+  }
+
+  /** Set ghost preview tile for build mode */
+  setGhost(tx: number, ty: number, color: number): void {
+    this.ghostX = tx;
+    this.ghostY = ty;
+    this.ghostColor = color;
+    this.ghostActive = true;
+  }
+
+  /** Clear the ghost preview */
+  clearGhost(): void {
+    this.ghostActive = false;
+    this.ghostX = -1;
+    this.ghostY = -1;
   }
 }

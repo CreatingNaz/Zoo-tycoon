@@ -7,6 +7,10 @@ export enum TileType {
   Dirt = 'dirt',
   Rock = 'rock',
   DeepWater = 'deep_water',
+  FenceWire = 'fence_wire',
+  FenceGlass = 'fence_glass',
+  FenceWall = 'fence_wall',
+  FenceWooden = 'fence_wooden',
 }
 
 /** Visual and gameplay properties for each tile type */
@@ -25,12 +29,24 @@ export const TILE_PROPERTIES: Record<TileType, TileProperties> = {
   [TileType.Dirt]:      { color: 0x8b6914, walkable: true,  buildable: true,  label: 'Dirt' },
   [TileType.Rock]:      { color: 0x6b6b6b, walkable: false, buildable: false, label: 'Rock' },
   [TileType.DeepWater]: { color: 0x1a5276, walkable: false, buildable: false, label: 'Deep Water' },
+  [TileType.FenceWire]:   { color: 0x888888, walkable: false, buildable: false, label: 'Wire Fence' },
+  [TileType.FenceGlass]:  { color: 0x88ccee, walkable: false, buildable: false, label: 'Glass Wall' },
+  [TileType.FenceWall]:   { color: 0x666666, walkable: false, buildable: false, label: 'Stone Wall' },
+  [TileType.FenceWooden]: { color: 0x8b6b3a, walkable: false, buildable: false, label: 'Wooden Fence' },
 };
+
+/** A decoration object placed on a tile */
+export interface Decoration {
+  id: string;
+  color: number;
+  label: string;
+}
 
 /** Cell data stored in each grid position */
 export interface TileCell {
   type: TileType;
   elevation: number;
+  decoration?: Decoration;
 }
 
 /** Grid-based tile map storing all terrain data */
@@ -59,11 +75,25 @@ export class TileMap {
 
   setCell(x: number, y: number, type: TileType, elevation: number = 0): void {
     if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
-    this.cells[y][x] = { type, elevation };
+    const existing = this.cells[y][x];
+    this.cells[y][x] = { type, elevation, decoration: existing?.decoration };
+  }
+
+  setDecoration(x: number, y: number, decoration: Decoration | undefined): void {
+    if (x < 0 || x >= this.width || y < 0 || y >= this.height) return;
+    this.cells[y][x].decoration = decoration;
   }
 
   getType(x: number, y: number): TileType {
     return this.cells[y]?.[x]?.type ?? TileType.Grass;
+  }
+
+  /** Check if a tile type is a fence */
+  static isFence(type: TileType): boolean {
+    return type === TileType.FenceWire
+      || type === TileType.FenceGlass
+      || type === TileType.FenceWall
+      || type === TileType.FenceWooden;
   }
 
   /** Generate a simple starter map with some variety */
