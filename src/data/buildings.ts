@@ -1,7 +1,7 @@
 import { TileType } from '../world/TileMap';
 
 /** Categories of buildable items */
-export type BuildCategory = 'terrain' | 'paths' | 'fencing' | 'decorations' | 'habitats';
+export type BuildCategory = 'terrain' | 'paths' | 'fencing' | 'decorations' | 'habitats' | 'facilities' | 'animals';
 
 /** A buildable item definition */
 export interface BuildItem {
@@ -53,6 +53,22 @@ export const BUILD_ITEMS: BuildItem[] = [
   { id: 'shelter', label: 'Shelter', category: 'habitats', cost: 60, color: 0x7a6a5a },
   { id: 'water_dish', label: 'Water Dish', category: 'habitats', cost: 20, color: 0x4a8ac6 },
   { id: 'enrichment', label: 'Enrichment Toy', category: 'habitats', cost: 35, color: 0xd07030 },
+
+  // Visitor facilities
+  { id: 'food_stall', label: 'Food Stall', category: 'facilities', cost: 200, color: 0xE8A040 },
+  { id: 'gift_shop', label: 'Gift Shop', category: 'facilities', cost: 300, color: 0xC040C0 },
+  { id: 'restroom', label: 'Restroom', category: 'facilities', cost: 150, color: 0x4080C0 },
+  { id: 'info_booth', label: 'Info Booth', category: 'facilities', cost: 100, color: 0x40C080 },
+
+  // Animals (purchasable species)
+  { id: 'komodo_dragon', label: 'Komodo Dragon', category: 'animals', cost: 800, color: 0x6b5b3a },
+  { id: 'saltwater_croc', label: 'Saltwater Croc', category: 'animals', cost: 1000, color: 0x4a6b4a },
+  { id: 'green_iguana', label: 'Green Iguana', category: 'animals', cost: 400, color: 0x5a8b3a },
+  { id: 'chameleon', label: 'Chameleon', category: 'animals', cost: 300, color: 0x7ab648 },
+  { id: 'galapagos_tortoise', label: 'Galapagos Tortoise', category: 'animals', cost: 600, color: 0x5a6b4a },
+  { id: 'poison_dart_frog', label: 'Poison Dart Frog', category: 'animals', cost: 200, color: 0x2a7ae8 },
+  { id: 'leopard_gecko', label: 'Leopard Gecko', category: 'animals', cost: 250, color: 0xe8c840 },
+  { id: 'axolotl', label: 'Axolotl', category: 'animals', cost: 350, color: 0xe898a8 },
 ];
 
 /** Category display names */
@@ -62,4 +78,6 @@ export const CATEGORY_LABELS: Record<BuildCategory, string> = {
   fencing: 'Fencing',
   decorations: 'Decor',
   habitats: 'Habitat',
+  facilities: 'Facilities',
+  animals: 'Animals',
 };

@@ -59,7 +59,7 @@ export class BuildPanel {
 
   private renderCategories(): void {
     this.categoriesEl.textContent = '';
-    const categories: BuildCategory[] = ['terrain', 'paths', 'fencing', 'decorations', 'habitats'];
+    const categories: BuildCategory[] = ['terrain', 'paths', 'fencing', 'decorations', 'habitats', 'facilities', 'animals'];
 
     for (const cat of categories) {
       const btn = document.createElement('button');

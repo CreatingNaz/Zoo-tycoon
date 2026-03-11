@@ -96,6 +96,26 @@ export class TileMap {
       || type === TileType.FenceWooden;
   }
 
+  /** Check if a tile type is a path */
+  static isPath(type: TileType): boolean {
+    return type === TileType.Path;
+  }
+
+  /** Get adjacent path tile positions */
+  getAdjacentPathTiles(x: number, y: number): { x: number; y: number }[] {
+    const result: { x: number; y: number }[] = [];
+    for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx >= 0 && nx < this.width && ny >= 0 && ny < this.height) {
+        if (TileMap.isPath(this.cells[ny][nx].type)) {
+          result.push({ x: nx, y: ny });
+        }
+      }
+    }
+    return result;
+  }
+
   /** Generate a simple starter map with some variety */
   generateStarterMap(): void {
     const cx = Math.floor(this.width / 2);
@@ -119,8 +139,8 @@ export class TileMap {
         else if (dist > 12 && dist < 15 && Math.random() < 0.15) {
           this.setCell(x, y, TileType.Rock);
         }
-        // Main path from entrance
-        else if ((Math.abs(x - cx) < 1 && y > cy - 10 && y < cy + 10) ||
+        // Main path from entrance — extends south to map edge for visitor entrance
+        else if ((Math.abs(x - cx) < 1 && y > cy - 10 && y < this.height) ||
                  (Math.abs(y - cy) < 1 && x > cx - 10 && x < cx + 10)) {
           this.setCell(x, y, TileType.Path);
         }

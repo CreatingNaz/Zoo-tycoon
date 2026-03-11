@@ -11,6 +11,11 @@ import { AnimalPanel } from '../ui/AnimalPanel';
 import { BuildItem } from '../data/buildings';
 import { HabitatDetector, Habitat } from '../world/Habitat';
 import { HappinessSystem } from '../simulation/HappinessSystem';
+import { VisitorSystem } from '../simulation/VisitorSystem';
+import { Visitor } from '../entities/Visitor';
+import { ZooStatsPanel } from '../ui/ZooStatsPanel';
+import { EconomySystem } from '../simulation/EconomySystem';
+import { EconomyPanel } from '../ui/EconomyPanel';
 import { screenToTile, isInBounds, tileToScreen } from '../utils/IsoMath';
 
 /** Main game class — orchestrates the game loop, rendering, and input */
@@ -24,14 +29,24 @@ export class Game {
   private animals: Animal[] = [];
   private buildPanel!: BuildPanel;
   private animalPanel!: AnimalPanel;
+  private zooStatsPanel!: ZooStatsPanel;
   private currentBuildItem: BuildItem | null = null;
   private habitatDetector!: HabitatDetector;
   private happinessSystem!: HappinessSystem;
+  private visitorSystem!: VisitorSystem;
+  private economySystem!: EconomySystem;
+  private economyPanel!: EconomyPanel;
   private habitats: Habitat[] = [];
+  private visitors: Visitor[] = [];
+  private zooRating = 1;
 
   // Happiness update throttle (every 2 seconds)
   private happinessTimer = 0;
   private readonly happinessInterval = 2000;
+
+  // Upkeep tick (every 10 seconds)
+  private upkeepTimer = 0;
+  private readonly upkeepInterval = 10000;
 
   // Edge scrolling
   private readonly edgeScrollMargin = 40;
@@ -71,11 +86,26 @@ export class Game {
     // Generate the starter map
     this.tileMap.generateStarterMap();
 
+    // Place a starter food stall near the center path intersection
+    const cx = Math.floor(this.tileMap.width / 2);
+    const cy = Math.floor(this.tileMap.height / 2);
+    this.tileMap.setDecoration(cx + 2, cy, {
+      id: 'food_stall',
+      color: 0xE8A040,
+      label: 'Food Stall',
+    });
+
     // Initialize habitat detector
     this.habitatDetector = new HabitatDetector(this.tileMap);
 
     // Initialize happiness system
     this.happinessSystem = new HappinessSystem(this.tileMap);
+
+    // Initialize visitor system
+    this.visitorSystem = new VisitorSystem(this.tileMap);
+
+    // Initialize economy system
+    this.economySystem = new EconomySystem(10000);
 
     // Spawn demo animals
     this.spawnDemoAnimals();
@@ -90,6 +120,12 @@ export class Game {
     };
 
     this.animalPanel = new AnimalPanel();
+    this.zooStatsPanel = new ZooStatsPanel();
+    this.economyPanel = new EconomyPanel(this.economySystem);
+
+    // Mutual exclusion: opening one panel closes the other
+    this.zooStatsPanel.onOpen = () => this.economyPanel.hide();
+    this.economyPanel.onOpen = () => this.zooStatsPanel.hide();
 
     // Center camera on the middle of the tile map
     const center = tileToScreen(
@@ -127,17 +163,58 @@ export class Game {
     if (this.happinessTimer >= this.happinessInterval) {
       this.happinessTimer = 0;
       this.happinessSystem.update(this.animals, this.habitats);
+      this.zooRating = this.visitorSystem.calculateZooRating(this.animals, this.habitats);
+      // Update admission price based on rating
+      this.visitorSystem.admissionPrice = this.economySystem.getAdmissionPrice(this.zooRating);
     }
+
+    // Economy minute cycle
+    this.economySystem.updateMinuteCycle(deltaMs);
+
+    // Upkeep tick
+    this.upkeepTimer += deltaMs;
+    if (this.upkeepTimer >= this.upkeepInterval) {
+      this.upkeepTimer = 0;
+      this.economySystem.tickUpkeep(this.animals.length, this.visitorSystem.countFacilities());
+    }
+
+    // Update visitors
+    const visitorResult = this.visitorSystem.update(
+      deltaMs, this.visitors, this.animals, this.habitats, this.zooRating,
+    );
+    for (const v of visitorResult.spawned) this.visitors.push(v);
+    for (const v of visitorResult.despawned) {
+      const idx = this.visitors.indexOf(v);
+      if (idx >= 0) this.visitors.splice(idx, 1);
+    }
+    if (visitorResult.income > 0) {
+      this.economySystem.earn(visitorResult.income, 'Visitors');
+    }
+
+    // Update zoo stats panel
+    this.zooStatsPanel.updateStats({
+      visitorCount: this.visitors.length,
+      zooRating: this.zooRating,
+      totalIncome: this.economySystem.lastIncomePerMinute,
+      incomeRate: this.economySystem.lastIncomePerMinute,
+      avgAnimalHappiness: this.animals.length > 0
+        ? this.animals.reduce((s, a) => s + a.happiness, 0) / this.animals.length : 0,
+      facilityCount: this.visitorSystem.countFacilities(),
+    });
 
     this.updateHoverHighlight();
     this.renderer.render(deltaMs);
 
-    // Render entity sprites
-    const spriteEntities = this.animals.map(a => a.toSpriteEntity());
+    // Render entity sprites (animals + visitors)
+    const spriteEntities = [
+      ...this.animals.map(a => a.toSpriteEntity()),
+      ...this.visitors.map(v => v.toSpriteEntity()),
+    ];
     this.spriteRenderer.render(spriteEntities, deltaMs);
 
     // Refresh animal panel if open
     this.animalPanel.refresh();
+    this.economyPanel.refresh();
 
     this.updateHUD();
   }
@@ -215,13 +292,33 @@ export class Game {
 
     if (!isInBounds(tile.x, tile.y, this.tileMap.width, this.tileMap.height)) return;
 
-    // Build mode: place tile or decoration
+    // Build mode: place tile, decoration, or animal
     if (this.currentBuildItem) {
-      if (this.currentBuildItem.tileType) {
+      // Afford check
+      if (!this.economySystem.canAfford(this.currentBuildItem.cost)) {
+        return; // Can't afford — don't place
+      }
+
+      if (this.currentBuildItem.category === 'animals') {
+        // Animal placement — spawn a new animal at this tile
+        const speciesData = SPECIES[this.currentBuildItem.id];
+        if (!speciesData) return;
+        this.economySystem.spend(this.currentBuildItem.cost, speciesData.name);
+        const animal = new Animal(
+          speciesData, tile.x, tile.y,
+          tile.x - 4, tile.y - 4, tile.x + 4, tile.y + 4
+        );
+        this.animals.push(animal);
+        this.assignAnimalsToHabitats();
+      } else if (this.currentBuildItem.tileType) {
         // Tile-based item (terrain, paths, fencing)
         this.tileMap.setCell(tile.x, tile.y, this.currentBuildItem.tileType);
-        this.updateHUDMoney(-this.currentBuildItem.cost);
+        this.economySystem.spend(this.currentBuildItem.cost, this.currentBuildItem.label);
 
+        // Re-find entrances when paths are placed
+        if (TileMap.isPath(this.currentBuildItem.tileType)) {
+          this.visitorSystem.findEntrances();
+        }
         // Re-detect habitats when fences are placed
         if (TileMap.isFence(this.currentBuildItem.tileType)) {
           this.habitats = this.habitatDetector.detectAll();
@@ -231,13 +328,13 @@ export class Game {
           }
         }
       } else {
-        // Decoration / habitat object
+        // Decoration / habitat object / facility
         this.tileMap.setDecoration(tile.x, tile.y, {
           id: this.currentBuildItem.id,
           color: this.currentBuildItem.color,
           label: this.currentBuildItem.label,
         });
-        this.updateHUDMoney(-this.currentBuildItem.cost);
+        this.economySystem.spend(this.currentBuildItem.cost, this.currentBuildItem.label);
         // Trigger happiness recalc since enrichment changed
         this.happinessSystem.update(this.animals, this.habitats);
       }
@@ -317,14 +414,6 @@ export class Game {
     }
   }
 
-  private updateHUDMoney(delta: number): void {
-    const hudMoney = document.getElementById('hud-money');
-    if (hudMoney) {
-      const current = parseInt(hudMoney.textContent?.replace(/[$,]/g, '') || '10000', 10);
-      const next = Math.max(0, current + delta);
-      hudMoney.textContent = `$${next.toLocaleString()}`;
-    }
-  }
 
   /** Spawn demo animals for testing */
   private spawnDemoAnimals(): void {
@@ -383,11 +472,36 @@ export class Game {
   private updateHUD(): void {
     const hudCamera = document.getElementById('hud-camera');
     const hudZoom = document.getElementById('hud-zoom');
+    const hudVisitors = document.getElementById('hud-visitors');
+    const hudRating = document.getElementById('hud-rating');
+    const hudMoney = document.getElementById('hud-money');
+    const hudProfit = document.getElementById('hud-profit');
     if (hudCamera) {
       hudCamera.textContent = `${Math.round(this.camera.x)}, ${Math.round(this.camera.y)}`;
     }
     if (hudZoom) {
       hudZoom.textContent = `${this.camera.zoom.toFixed(1)}x`;
+    }
+    if (hudVisitors) {
+      hudVisitors.textContent = `${this.visitors.length}`;
+    }
+    if (hudRating) {
+      hudRating.textContent = `${this.zooRating.toFixed(1)}`;
+    }
+    if (hudMoney) {
+      hudMoney.textContent = `$${Math.floor(this.economySystem.getMoney()).toLocaleString()}`;
+    }
+    if (hudProfit) {
+      const net = this.economySystem.getNetProfitPerMinute();
+      if (net > 0) {
+        hudProfit.textContent = '\u25B2'; // up arrow
+        hudProfit.style.color = '#4caf50';
+      } else if (net < 0) {
+        hudProfit.textContent = '\u25BC'; // down arrow
+        hudProfit.style.color = '#f44336';
+      } else {
+        hudProfit.textContent = '';
+      }
     }
   }
 }
