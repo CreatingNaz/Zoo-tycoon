@@ -46,11 +46,121 @@
       z-index: 10;
       pointer-events: none;
     }
+
+    /* Build panel */
+    #build-panel {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(0deg, rgba(10,10,30,0.95) 0%, rgba(10,10,30,0.85) 100%);
+      border-top: 1px solid rgba(100,255,218,0.2);
+      z-index: 20;
+      display: none;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    #build-panel.active { display: block; }
+    #build-panel .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    #build-panel .panel-title {
+      color: #64ffda;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    #build-panel .panel-close {
+      color: #8892b0;
+      cursor: pointer;
+      font-size: 18px;
+      background: none;
+      border: none;
+      padding: 4px 8px;
+    }
+    #build-panel .panel-close:hover { color: #fff; }
+    #build-categories {
+      display: flex;
+      gap: 4px;
+      padding: 8px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .build-cat-btn {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: #8892b0;
+      padding: 6px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-family: inherit;
+    }
+    .build-cat-btn:hover { background: rgba(255,255,255,0.1); color: #ccd6f6; }
+    .build-cat-btn.active { background: rgba(100,255,218,0.15); border-color: #64ffda; color: #64ffda; }
+    #build-items {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      overflow-x: auto;
+    }
+    .build-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      min-width: 72px;
+    }
+    .build-item:hover { background: rgba(255,255,255,0.05); }
+    .build-item.selected { border-color: #64ffda; background: rgba(100,255,218,0.1); }
+    .build-item .swatch {
+      width: 32px;
+      height: 32px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .build-item .item-label {
+      color: #ccd6f6;
+      font-size: 11px;
+      text-align: center;
+    }
+    .build-item .item-cost {
+      color: #64ffda;
+      font-size: 10px;
+    }
+
+    /* Build toggle button */
+    #build-toggle {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      background: rgba(100,255,218,0.15);
+      border: 1px solid #64ffda;
+      color: #64ffda;
+      padding: 10px 20px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 15;
+    }
+    #build-toggle:hover { background: rgba(100,255,218,0.25); }
+    #build-toggle.active { display: none; }
   </style>
 </head>
 <body>
   <div id="game-container">
     <div id="hud">
+      <div class="stat">
+        <span class="stat-label">Money:</span>
+        <span class="stat-value" id="hud-money">$10,000</span>
+      </div>
       <div class="stat">
         <span class="stat-label">Tile:</span>
         <span class="stat-value" id="hud-tile">-</span>
@@ -64,7 +174,18 @@
         <span class="stat-value" id="hud-zoom">1.0x</span>
       </div>
     </div>
-    <div id="tile-info">WASD / drag to pan | Scroll to zoom | Click tiles</div>
+    <div id="tile-info">WASD / drag to pan | Scroll to zoom | Click tiles | B to build</div>
+
+    <button id="build-toggle">Build (B)</button>
+
+    <div id="build-panel">
+      <div class="panel-header">
+        <span class="panel-title">Build Mode</span>
+        <button class="panel-close" id="build-close">x</button>
+      </div>
+      <div id="build-categories"></div>
+      <div id="build-items"></div>
+    </div>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>

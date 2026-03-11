@@ -3,9 +3,12 @@ import { Camera } from './Camera';
 import { InputManager } from './InputManager';
 import { IsometricRenderer } from './IsometricRenderer';
 import { SpriteRenderer } from './SpriteRenderer';
-import { TileMap, TILE_PROPERTIES } from '../world/TileMap';
+import { TileMap, TileType, TILE_PROPERTIES } from '../world/TileMap';
 import { Animal } from '../entities/Animal';
 import { SPECIES } from '../data/species';
+import { BuildPanel } from '../ui/BuildPanel';
+import { BuildItem } from '../data/buildings';
+import { HabitatDetector } from '../world/Habitat';
 import { screenToTile, isInBounds, tileToScreen } from '../utils/IsoMath';
 
 /** Main game class — orchestrates the game loop, rendering, and input */
@@ -17,6 +20,9 @@ export class Game {
   private spriteRenderer!: SpriteRenderer;
   private tileMap: TileMap;
   private animals: Animal[] = [];
+  private buildPanel!: BuildPanel;
+  private currentBuildItem: BuildItem | null = null;
+  private habitatDetector!: HabitatDetector;
 
   // Edge scrolling
   private readonly edgeScrollMargin = 40;
@@ -59,6 +65,18 @@ export class Game {
     // Spawn demo animals
     this.spawnDemoAnimals();
 
+    // Initialize habitat detector
+    this.habitatDetector = new HabitatDetector(this.tileMap);
+
+    // Initialize build panel
+    this.buildPanel = new BuildPanel();
+    this.buildPanel.onSelectionChange = (item) => {
+      this.currentBuildItem = item;
+      if (!item) {
+        this.renderer.clearGhost();
+      }
+    };
+
     // Center camera on the middle of the tile map
     // tileToScreen(32,32) for a 64x64 map = ((32-32)*32, (32+32)*16) = (0, 1024)
     const center = tileToScreen(
@@ -89,7 +107,7 @@ export class Game {
     }
 
     this.updateHoverHighlight();
-    this.renderer.render();
+    this.renderer.render(deltaMs);
 
     // Render entity sprites
     const spriteEntities = this.animals.map(a => a.toSpriteEntity());
@@ -152,8 +170,16 @@ export class Game {
 
     if (isInBounds(tile.x, tile.y, this.tileMap.width, this.tileMap.height)) {
       this.renderer.setHighlight(tile.x, tile.y);
+
+      // Show ghost preview in build mode
+      if (this.currentBuildItem) {
+        this.renderer.setGhost(tile.x, tile.y, this.currentBuildItem.color);
+      } else {
+        this.renderer.clearGhost();
+      }
     } else {
       this.renderer.clearHighlight();
+      this.renderer.clearGhost();
     }
   }
 
@@ -161,18 +187,53 @@ export class Game {
     const world = this.camera.screenToWorld(screenX, screenY);
     const tile = screenToTile(world.x, world.y);
 
-    if (isInBounds(tile.x, tile.y, this.tileMap.width, this.tileMap.height)) {
-      const cell = this.tileMap.getCell(tile.x, tile.y);
-      if (cell) {
-        const props = TILE_PROPERTIES[cell.type];
-        console.log(`Clicked tile (${tile.x}, ${tile.y}): ${props.label}`);
+    if (!isInBounds(tile.x, tile.y, this.tileMap.width, this.tileMap.height)) return;
 
-        // Update HUD tile display
-        const hudTile = document.getElementById('hud-tile');
-        if (hudTile) {
-          hudTile.textContent = `(${tile.x}, ${tile.y}) ${props.label}`;
+    // Build mode: place tile or decoration
+    if (this.currentBuildItem) {
+      if (this.currentBuildItem.tileType) {
+        // Tile-based item (terrain, paths, fencing)
+        this.tileMap.setCell(tile.x, tile.y, this.currentBuildItem.tileType);
+        this.updateHUDMoney(-this.currentBuildItem.cost);
+
+        // Re-detect habitats when fences are placed
+        if (TileMap.isFence(this.currentBuildItem.tileType)) {
+          const habitats = this.habitatDetector.detectAll();
+          if (habitats.length > 0) {
+            console.log(`Detected ${habitats.length} habitat(s):`, habitats.map(h => `${h.area} tiles`));
+          }
         }
+      } else {
+        // Decoration / habitat object
+        this.tileMap.setDecoration(tile.x, tile.y, {
+          id: this.currentBuildItem.id,
+          color: this.currentBuildItem.color,
+          label: this.currentBuildItem.label,
+        });
+        this.updateHUDMoney(-this.currentBuildItem.cost);
       }
+      return;
+    }
+
+    // Normal mode: inspect tile
+    const cell = this.tileMap.getCell(tile.x, tile.y);
+    if (cell) {
+      const props = TILE_PROPERTIES[cell.type];
+      console.log(`Clicked tile (${tile.x}, ${tile.y}): ${props.label}`);
+
+      const hudTile = document.getElementById('hud-tile');
+      if (hudTile) {
+        hudTile.textContent = `(${tile.x}, ${tile.y}) ${props.label}`;
+      }
+    }
+  }
+
+  private updateHUDMoney(delta: number): void {
+    const hudMoney = document.getElementById('hud-money');
+    if (hudMoney) {
+      const current = parseInt(hudMoney.textContent?.replace(/[$,]/g, '') || '10000', 10);
+      const next = Math.max(0, current + delta);
+      hudMoney.textContent = `$${next.toLocaleString()}`;
     }
   }
 
